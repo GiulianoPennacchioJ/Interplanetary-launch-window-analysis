@@ -26,14 +26,14 @@ def poliastro_lambert_solver(dep_mjd, arr_mjd):
     t_dep = Time(dep_mjd, format="mjd", scale="tdb")
     t_arr = Time(arr_mjd, format="mjd", scale="tdb")
     
-    # Retrieve Sun gravitational parameter in km^3 / s^2
-    k = GM_sun.to(u.km**3 / u.s**2).value
+    # Retrieve Sun gravitational parameter keeping Astropy units (required by poliastro.iod.lambert)
+    k = GM_sun.to(u.km**3 / u.s**2)
     
-    # Get position (r) and velocity (v) vectors using Ephem.from_body (compatible with modern poliastro versions)
+    # Get position (r) and velocity (v) vectors using Ephem.from_body
     r1_q, v1_q = Ephem.from_body(Earth, t_dep).rv(t_dep)
     r2_q, v2_q = Ephem.from_body(Mars, t_arr).rv(t_arr)
     
-    # Extract numerical values in km and km/s
+    # Extract numerical values in km and km/s for vector math
     r1 = r1_q.to(u.km).value
     v1 = v1_q.to(u.km / u.s).value
     r2 = r2_q.to(u.km).value
@@ -42,7 +42,7 @@ def poliastro_lambert_solver(dep_mjd, arr_mjd):
     # Calculate time of flight in seconds
     tof_sec = (arr_mjd - dep_mjd) * 86400.0
     
-    # Solve Lambert's problem (returns initial and final velocity vectors of the transfer orbit)
+    # Solve Lambert's problem (k must be a Quantity object here)
     v_init, v_final = lambert(k, r1, r2, tof_sec)
     
     # Compute hyperbolic excess velocity vectors
@@ -56,7 +56,6 @@ def poliastro_lambert_solver(dep_mjd, arr_mjd):
 
 def main():
     # 1. Define the search space grid for an Earth-Mars transfer (Dates in MJD)
-    # Example window for a 2026/2027 Earth-Mars opportunity
     dep_dates = np.linspace(61200.0, 61350.0, 50)  # 50 departure steps
     arr_dates = np.linspace(61400.0, 61800.0, 60)  # 60 arrival steps
 

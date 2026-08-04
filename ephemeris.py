@@ -352,6 +352,7 @@ class JPLSpiceEphemeris:
         """
         self.kernel_path = kernel_path
         self._spice_available = False
+        self._spice = None
 
         try:
             import spiceypy as spice
@@ -360,7 +361,7 @@ class JPLSpiceEphemeris:
             if kernel_path:
                 spice.furnsh(kernel_path)
         except ImportError:
-            print("Warning: spiceypy not available. Falling back to analytical ephemeris.")
+            # spiceypy not installed - silently fall back
             self._fallback = AnalyticalEphemeris()
 
     def get_state(self, planet_name: str, epoch_jd: float) -> PlanetState:

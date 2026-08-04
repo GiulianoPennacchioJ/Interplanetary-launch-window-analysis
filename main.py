@@ -26,31 +26,28 @@ def poliastro_lambert_solver(dep_mjd, arr_mjd):
     t_dep = Time(dep_mjd, format="mjd", scale="tdb")
     t_arr = Time(arr_mjd, format="mjd", scale="tdb")
     
-    # Retrieve Sun gravitational parameter keeping Astropy units (required by poliastro.iod.lambert)
+    # Retrieve Sun gravitational parameter as an Astropy Quantity
     k = GM_sun.to(u.km**3 / u.s**2)
     
-    # Get position (r) and velocity (v) vectors using Ephem.from_body
+    # Get position and velocity vectors as Astropy Quantities using Ephem.from_body
     r1_q, v1_q = Ephem.from_body(Earth, t_dep).rv(t_dep)
     r2_q, v2_q = Ephem.from_body(Mars, t_arr).rv(t_arr)
     
-    # Extract numerical values in km and km/s for vector math
-    r1 = r1_q.to(u.km).value
-    v1 = v1_q.to(u.km / u.s).value
-    r2 = r2_q.to(u.km).value
-    v2 = v2_q.to(u.km / u.s).value
+    # Ensure proper distance and velocity units
+    r1 = r1_q.to(u.km)
+    v1 = v1_q.to(u.km / u.s)
+    r2 = r2_q.to(u.km)
+    v2 = v2_q.to(u.km / u.s)
     
-    # Calculate time of flight in seconds
-    tof_sec = (arr_mjd - dep_mjd) * 86400.0
+    # Calculate time of flight as an Astropy Quantity in seconds
+    tof_sec = ((arr_mjd - dep_mjd) * 86400.0) * u.s
     
-    # Solve Lambert's problem (k must be a Quantity object here)
+    # Solve Lambert's problem (inputs must retain Astropy units)
     v_init, v_final = lambert(k, r1, r2, tof_sec)
     
-    # Compute hyperbolic excess velocity vectors
-    # Departure: Transfer initial velocity minus Earth's heliocentric velocity
-    v_inf_dep_vec = v_init - v1
-    
-    # Arrival: Mars' heliocentric velocity minus Transfer final velocity
-    v_inf_arr_vec = v2 - v_final
+    # Compute hyperbolic excess velocity vectors and convert to clean NumPy arrays (km/s)
+    v_inf_dep_vec = (v_init - v1).to_value(u.km / u.s)
+    v_inf_arr_vec = (v2 - v_final).to_value(u.km / u.s)
     
     return v_inf_dep_vec, v_inf_arr_vec
 

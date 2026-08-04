@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 
 from ephemeris import EphemerisManager
-from lambert_gooding import TransferType
+from lambert_ import TransferType
 from porkchop import PorkchopEngine
 from plotting import PorkchopPlotter, TrajectoryPlotter
 

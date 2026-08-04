@@ -30,7 +30,7 @@ Example:
 __version__ = "1.0.0"
 __author__ = "Interplanetary Launch Window Analysis Project"
 
-from .lambert_gooding import LambertGooding, TransferType, LambertSolution, solve_lambert
+from .lambert_ import LambertGooding, TransferType, LambertSolution, solve_lambert
 from .ephemeris import EphemerisManager, PlanetState, OrbitalElements
 from .porkchop import PorkchopEngine, PorkchopGrid
 from .plotting import PorkchopPlotter, TrajectoryPlotter

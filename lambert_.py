@@ -1,20 +1,22 @@
 """
 lambert_gooding.py
 ==================
-Robust implementation of Gooding's algorithm (1990) for the Lambert Problem.
+Robust Lambert Problem Solver using Battin's Universal Variable Formulation.
+
+Based on the algorithm from Vallado, "Fundamentals of Astrodynamics and 
+Applications", 4th ed., Chapter 7.
 
 Solves for the orbital transfer between two position vectors given a time of flight.
-Handles both short-way (Type-I) and long-way (Type-II) transfers.
-
-This implementation uses the universal variable formulation with the 
-Lancaster-Blanchard parameterization, following Gooding's original paper.
+Handles both short-way (Type-I) and long-way (Type-II) transfers with robust
+exception handling and numerical stability.
 
 References:
 -----------
-Gooding, R.H. "A procedure for the solution of Lambert's orbital boundary-value problem."
-Celestial Mechanics and Dynamical Astronomy, 48(2), 145-165, 1990.
-
 Vallado, D.A. "Fundamentals of Astrodynamics and Applications", 4th ed.
+    Microcosm Press, 2013. Chapter 7: Lambert's Problem.
+
+Battin, R.H. "An Introduction to the Mathematics and Methods of Astrodynamics",
+    AIAA Education Series, 1999.
 """
 
 import numpy as np
@@ -53,10 +55,10 @@ class LambertError(Exception):
 
 class LambertGooding:
     """
-    Gooding's Lambert Problem Solver.
+    Lambert Problem Solver using Battin's Universal Variable Formulation.
 
-    Implements the robust iterative algorithm based on the Lancaster-Blanchard
-    universal variable formulation with Halley's method for rapid convergence.
+    Implements the robust iterative algorithm based on universal variables
+    with Newton-Raphson iteration for rapid convergence.
     """
 
     MU_SUN = 1.32712440018e11  # Gravitational parameter of the Sun [km^3/s^2]
@@ -80,7 +82,7 @@ class LambertGooding:
               max_iterations: int = 50,
               tolerance: float = 1e-12) -> LambertSolution:
         """
-        Solve the Lambert problem using Gooding's algorithm.
+        Solve the Lambert problem using Battin's universal variable formulation.
 
         Parameters
         ----------
@@ -136,24 +138,23 @@ class LambertGooding:
         if sin_dnu < 1e-12 and transfer_type == TransferType.LONG_WAY:
             raise LambertError("180° transfer not possible for long-way trajectory")
 
-        # Geometric parameters
-        c = np.sqrt(r1_norm**2 + r2_norm**2 - 2.0 * r1_norm * r2_norm * cos_dnu)
-        s = (r1_norm + r2_norm + c) / 2.0
+        # Parameter A (related to chord)
+        A = np.sqrt(r1_norm * r2_norm * (1.0 + np.cos(dnu)))
+        if transfer_type == TransferType.LONG_WAY:
+            A = -A
 
-        # Minimum energy semi-major axis
-        a_min = s / 2.0
+        if abs(A) < 1e-12:
+            raise LambertError("Transfer angle is 180° (degenerate case)")
 
-        # Non-dimensional time parameter
-        T = np.sqrt(8.0 * self.mu / s**3) * tof
+        # Solve for universal variable z using Newton-Raphson
+        z = self._solve_for_z(r1_norm, r2_norm, A, tof, max_iterations, tolerance)
 
-        # q parameter (related to geometry)
-        q = np.sqrt(r1_norm * r2_norm) * np.cos(dnu / 2.0) / s
-
-        # Solve for the universal variable x
-        x = self._solve_for_x(T, q, transfer_type, max_iterations, tolerance)
+        # Compute f and g functions
+        f, g, g_dot = self._compute_fg(r1_norm, r2_norm, A, z)
 
         # Compute velocity vectors
-        v1, v2 = self._compute_velocities(r1, r2, r1_norm, r2_norm, c, s, x, dnu, transfer_type)
+        v1 = (r2 - f * r1) / g
+        v2 = (g_dot * r2 - r1) / g
 
         # Compute orbital elements
         orbital_elements = self._compute_orbital_elements(r1, v1, r1_norm, r2_norm, dnu)
@@ -162,211 +163,178 @@ class LambertGooding:
             v1=v1, v2=v2, transfer_type=transfer_type, tof=tof, **orbital_elements
         )
 
-    def _solve_for_x(self, T: float, q: float, transfer_type: TransferType,
+    def _solve_for_z(self, r1: float, r2: float, A: float, tof: float,
                      max_iter: int, tol: float) -> float:
         """
-        Solve for the universal variable x using Gooding's iterative method.
+        Solve for the universal variable z using Newton-Raphson iteration.
 
-        The variable x is related to the semi-major axis by:
-        a = s / (2 * (1 - x^2))
+        The universal variable z is related to the orbit type:
+        z > 0: elliptic
+        z = 0: parabolic  
+        z < 0: hyperbolic
 
-        For elliptic orbits: |x| < 1
-        For parabolic: x = 1
-        For hyperbolic: x > 1
+        Parameters
+        ----------
+        r1, r2 : float
+            Magnitudes of position vectors [km]
+        A : float
+            Transfer parameter [km]
+        tof : float
+            Time of flight [s]
+        max_iter : int
+        tol : float
+
+        Returns
+        -------
+        float
+            Universal variable z
         """
-        # Initial guess based on Gooding's recommendations
-        if transfer_type == TransferType.SHORT_WAY:
-            # Short-way: initial guess
-            if T < np.pi:
-                x0 = 0.5
-            else:
-                x0 = 0.5
-            # Clamp to valid range for short-way
-            x0 = np.clip(x0, -0.99, 0.99)
-        else:
-            # Long-way: initial guess
-            x0 = 1.5
-            x0 = np.clip(x0, 1.01, 10.0)
+        # Initial guess
+        # For Hohmann-like transfers, z is small positive (elliptic)
+        # For hyperbolic transfers, z is negative
+        z = 0.0  # Start with parabolic guess
 
-        # Iterative solution using Halley's method
-        x = x0
         for iteration in range(max_iter):
-            # Compute time function and derivatives
-            t_val, dt_dx, d2t_dx2 = self._compute_time_function(x, q, transfer_type)
+            # Compute Stumpff functions
+            C, S = self._stumpff(z)
+
+            # Compute y
+            y = r1 + r2 + A * (z * S - 1.0) / np.sqrt(C) if abs(C) > 1e-15 else r1 + r2
+
+            if y < 0:
+                # y must be positive - adjust z
+                z = z * 0.9
+                continue
+
+            # Time of flight equation
+            sqrt_y = np.sqrt(y)
+            sqrt_C = np.sqrt(C) if C > 0 else np.sqrt(abs(C))
+
+            if abs(sqrt_C) < 1e-15:
+                # Parabolic case
+                t_current = (sqrt_y**3) / (3.0 * self.mu)
+            else:
+                t_current = (sqrt_y**3 * S + A * sqrt_y) / sqrt_C / np.sqrt(self.mu)
 
             # Residual
-            f = t_val - T
+            f = t_current - tof
 
             if abs(f) < tol:
-                return x
+                return z
 
-            # Halley's method update
-            if abs(dt_dx) < 1e-15:
-                raise LambertError("Derivative too small, cannot converge")
+            # Derivative dt/dz using finite differences
+            h = 1e-8
+            t_plus = self._compute_tof(r1, r2, A, z + h)
+            t_minus = self._compute_tof(r1, r2, A, z - h)
 
-            # Halley: x_new = x - f / (f' - f*f''/(2*f'))
-            denom = dt_dx - f * d2t_dx2 / (2.0 * dt_dx)
-            if abs(denom) < 1e-15:
-                dx = -f / dt_dx  # Fall back to Newton
-            else:
-                dx = -f / denom
+            df = (t_plus - t_minus) / (2.0 * h)
 
-            x_new = x + dx
+            if abs(df) < 1e-15:
+                # Fallback to small step
+                z = z + 0.1
+                continue
 
-            # Keep x in valid range
-            if transfer_type == TransferType.SHORT_WAY:
-                x_new = np.clip(x_new, -0.999, 0.999)
-            else:
-                x_new = np.clip(x_new, 1.001, 20.0)
+            # Newton-Raphson update
+            dz = -f / df
+            z_new = z + dz
 
-            if abs(x_new - x) < tol:
-                return x_new
+            # Damping for stability
+            if abs(dz) > 1.0:
+                dz = np.sign(dz) * 1.0
+                z_new = z + dz
 
-            x = x_new
+            # Keep z in reasonable range
+            z_new = np.clip(z_new, -100.0, 100.0)
+
+            if abs(z_new - z) < tol:
+                return z_new
+
+            z = z_new
 
         raise LambertError(f"Failed to converge after {max_iter} iterations. "
-                          f"Final residual: {abs(f):.2e}")
+                          f"Final residual: {abs(f):.2e}, z = {z:.6f}")
 
-    def _compute_time_function(self, x: float, q: float, 
-                                transfer_type: TransferType) -> Tuple[float, float, float]:
-        """
-        Compute the non-dimensional time function t(x) and its derivatives.
-
-        Uses the Lancaster-Blanchard formulation.
-        """
-        # Compute y
-        y_sq = 1.0 - q**2 * (1.0 - x**2)
-        if y_sq < 0:
-            y_sq = 1e-15
-        y = np.sqrt(y_sq)
-
-        # Compute eta
-        eta = y - q * x
-
-        # Compute zeta
-        zeta = y - x * q
-
-        # Time function based on orbit type
-        if transfer_type == TransferType.SHORT_WAY:
-            if x < 1.0:
-                # Elliptic short-way
-                arg = x * q + eta
-                arg = np.clip(arg, -1.0, 1.0)
-
-                if x >= 0:
-                    t = np.arccos(arg) - x * y + q * zeta
-                else:
-                    t = -np.arccos(arg) - x * y + q * zeta
-            else:
-                # Hyperbolic short-way
-                arg = x * q + eta
-                arg = max(arg, 1.0 + 1e-15)
-                t = -np.arccosh(arg) + x * y - q * zeta
-        else:
-            if x < 1.0:
-                # Elliptic long-way
-                arg = x * q + eta
-                arg = np.clip(arg, -1.0, 1.0)
-                t = 2.0 * np.pi - np.arccos(arg) + x * y - q * zeta
-            else:
-                # Hyperbolic long-way
-                arg = x * q + eta
-                arg = max(arg, 1.0 + 1e-15)
-                t = 2.0 * np.pi + np.arccosh(arg) - x * y + q * zeta
-
-        # Compute derivatives using finite differences
-        h = 1e-8
-        t_plus = self._compute_time_raw(x + h, q, transfer_type)
-        t_minus = self._compute_time_raw(x - h, q, transfer_type)
-
-        dt_dx = (t_plus - t_minus) / (2.0 * h)
-        d2t_dx2 = (t_plus - 2.0 * t + t_minus) / (h**2)
-
-        return t, dt_dx, d2t_dx2
-
-    def _compute_time_raw(self, x: float, q: float, transfer_type: TransferType) -> float:
-        """Raw time computation for derivative estimation."""
-        y_sq = max(1.0 - q**2 * (1.0 - x**2), 1e-15)
-        y = np.sqrt(y_sq)
-        eta = y - q * x
-        zeta = y - x * q
-
-        if transfer_type == TransferType.SHORT_WAY:
-            if x < 1.0:
-                arg = np.clip(x * q + eta, -1.0, 1.0)
-                if x >= 0:
-                    return np.arccos(arg) - x * y + q * zeta
-                else:
-                    return -np.arccos(arg) - x * y + q * zeta
-            else:
-                arg = max(x * q + eta, 1.0 + 1e-15)
-                return -np.arccosh(arg) + x * y - q * zeta
-        else:
-            if x < 1.0:
-                arg = np.clip(x * q + eta, -1.0, 1.0)
-                return 2.0 * np.pi - np.arccos(arg) + x * y - q * zeta
-            else:
-                arg = max(x * q + eta, 1.0 + 1e-15)
-                return 2.0 * np.pi + np.arccosh(arg) - x * y + q * zeta
-
-    def _compute_velocities(self, r1: np.ndarray, r2: np.ndarray,
-                             r1_norm: float, r2_norm: float,
-                             c: float, s: float, x: float,
-                             dnu: float,
-                             transfer_type: TransferType) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Compute departure and arrival velocity vectors using f and g functions.
-        """
-        # Semi-major axis
-        a = s / (2.0 * (1.0 - x**2))
-
-        # Parameter A (related to geometry)
-        A = np.sqrt(r1_norm * r2_norm * (1.0 + np.cos(dnu)))
-        if transfer_type == TransferType.LONG_WAY:
-            A = -A
-
-        # Universal variable z = x^2
-        z = x**2
-
-        # Stumpff functions
+    def _compute_tof(self, r1: float, r2: float, A: float, z: float) -> float:
+        """Compute time of flight for a given z."""
         C, S = self._stumpff(z)
 
-        # y parameter
         if abs(C) < 1e-15:
-            y = r1_norm + r2_norm
+            y = r1 + r2
+            return (y**1.5) / (3.0 * self.mu)
+
+        sqrt_C = np.sqrt(C)
+        y = r1 + r2 + A * (z * S - 1.0) / sqrt_C
+
+        if y < 0:
+            return float('inf')
+
+        sqrt_y = np.sqrt(y)
+        return (sqrt_y**3 * S + A * sqrt_y) / sqrt_C / np.sqrt(self.mu)
+
+    def _compute_fg(self, r1: float, r2: float, A: float, z: float) -> Tuple[float, float, float]:
+        """
+        Compute f, g, and g_dot Lagrange coefficients.
+
+        Parameters
+        ----------
+        r1, r2 : float
+            Position magnitudes [km]
+        A : float
+            Transfer parameter [km]
+        z : float
+            Universal variable
+
+        Returns
+        -------
+        tuple (f, g, g_dot)
+        """
+        C, S = self._stumpff(z)
+
+        if abs(C) < 1e-15:
+            y = r1 + r2
         else:
-            y = r1_norm + r2_norm + A * (z * S - 1.0) / np.sqrt(C)
+            y = r1 + r2 + A * (z * S - 1.0) / np.sqrt(C)
 
-        if y < 1e-15:
-            raise LambertError("Invalid y parameter")
+        if y < 0:
+            raise LambertError(f"Invalid y = {y} for z = {z}")
 
-        # f and g Lagrange coefficients
-        f = 1.0 - y / r1_norm
-        g = A * np.sqrt(y / self.mu)
-        g_dot = 1.0 - y / r2_norm
+        sqrt_y = np.sqrt(y)
+        sqrt_mu = np.sqrt(self.mu)
 
-        # Velocity vectors
-        v1 = (r2 - f * r1) / g
-        v2 = (g_dot * r2 - r1) / g
+        # f and g functions
+        f = 1.0 - y / r1
+        g = A * sqrt_y / sqrt_mu
+        g_dot = 1.0 - y / r2
 
-        return v1, v2
+        return f, g, g_dot
 
     def _stumpff(self, z: float) -> Tuple[float, float]:
         """
         Compute Stumpff functions c2(z) and c3(z).
 
-        Universal functions for the universal variable formulation.
+        Universal functions used in the universal variable formulation.
+
+        Parameters
+        ----------
+        z : float
+            Universal variable
+
+        Returns
+        -------
+        tuple (c2, c3)
         """
         if z > 1e-6:
+            # Elliptic
             sqrt_z = np.sqrt(z)
             c2 = (1.0 - np.cos(sqrt_z)) / z
             c3 = (sqrt_z - np.sin(sqrt_z)) / (z * sqrt_z)
         elif z < -1e-6:
+            # Hyperbolic
             sqrt_neg_z = np.sqrt(-z)
             c2 = (1.0 - np.cosh(sqrt_neg_z)) / z
             c3 = (np.sinh(sqrt_neg_z) - sqrt_neg_z) / (-z * sqrt_neg_z)
         else:
-            # Series expansion
+            # Series expansion near zero
             c2 = 0.5 - z / 24.0 + z**2 / 720.0 - z**3 / 40320.0
             c3 = 1.0 / 6.0 - z / 120.0 + z**2 / 5040.0 - z**3 / 362880.0
 

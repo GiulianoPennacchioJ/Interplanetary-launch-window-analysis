@@ -23,7 +23,7 @@ import warnings
 
 from porkchop import PorkchopGrid, PorkchopEngine
 from ephemeris import EphemerisManager
-from lambert_gooding import LambertGooding, TransferType
+from lambert_ import LambertGooding, TransferType
 
 
 # Default plot style

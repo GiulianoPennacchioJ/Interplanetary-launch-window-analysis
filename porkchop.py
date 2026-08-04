@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import warnings
 
-from lambert_gooding import LambertGooding, TransferType, LambertSolution, LambertError
+from lambert_ import LambertGooding, TransferType, LambertSolution, LambertError
 from ephemeris import EphemerisManager, PlanetState
 
 

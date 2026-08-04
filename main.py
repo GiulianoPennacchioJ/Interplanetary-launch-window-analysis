@@ -8,81 +8,73 @@ from poliastro.constants import GM_sun
 from poliastro.ephem import Ephem
 
 from porkchop import PorkchopCalculator
-from plotting import plot_porkchop
+from plotting import plot_porkchop, plot_vinf_arrival, plot_trajectory_3d
 
 def poliastro_lambert_solver(dep_mjd, arr_mjd):
-    """
-    Real planetary ephemeris lookup and Lambert problem solver using Poliastro.
-    
-    Parameters:
-    - dep_mjd: Departure date in Modified Julian Date (MJD).
-    - arr_mjd: Arrival date in Modified Julian Date (MJD).
-    
-    Returns:
-    - v_inf_dep_vec: 3D numpy array of departure hyperbolic excess velocity (km/s).
-    - v_inf_arr_vec: 3D numpy array of arrival hyperbolic excess velocity (km/s).
-    """
-    # Convert Modified Julian Dates to Astropy Time objects (TDB scale for dynamical accuracy)
     t_dep = Time(dep_mjd, format="mjd", scale="tdb")
     t_arr = Time(arr_mjd, format="mjd", scale="tdb")
     
-    # Retrieve Sun gravitational parameter as an Astropy Quantity
     k = GM_sun.to(u.km**3 / u.s**2)
     
-    # Get position and velocity vectors as Astropy Quantities using Ephem.from_body
     r1_q, v1_q = Ephem.from_body(Earth, t_dep).rv(t_dep)
     r2_q, v2_q = Ephem.from_body(Mars, t_arr).rv(t_arr)
     
-    # Ensure proper distance and velocity units
     r1 = r1_q.to(u.km)
     v1 = v1_q.to(u.km / u.s)
     r2 = r2_q.to(u.km)
     v2 = v2_q.to(u.km / u.s)
     
-    # Calculate time of flight as an Astropy Quantity in seconds
     tof_sec = ((arr_mjd - dep_mjd) * 86400.0) * u.s
-    
-    # Solve Lambert's problem (inputs must retain Astropy units)
     v_init, v_final = lambert(k, r1, r2, tof_sec)
     
-    # Compute hyperbolic excess velocity vectors and convert to clean NumPy arrays (km/s)
     v_inf_dep_vec = (v_init - v1).to_value(u.km / u.s)
     v_inf_arr_vec = (v2 - v_final).to_value(u.km / u.s)
     
     return v_inf_dep_vec, v_inf_arr_vec
 
 def main():
-    # 1. Define the search space grid for an Earth-Mars transfer (Dates in MJD)
-    dep_dates = np.linspace(61200.0, 61350.0, 50)  # 50 departure steps
-    arr_dates = np.linspace(61400.0, 61800.0, 60)  # 60 arrival steps
+    # 1. Griglia di ricerca spaziale (MJD)
+    dep_dates = np.linspace(61200.0, 61350.0, 50)
+    arr_dates = np.linspace(61400.0, 61800.0, 60)
 
-    print(f"Initializing PorkchopCalculator for Earth-Mars Transfer...")
-    print(f"Departure Grid Size: {len(dep_dates)} steps (MJD {dep_dates[0]:.1f} to {dep_dates[-1]:.1f})")
-    print(f"Arrival Grid Size:   {len(arr_dates)} steps (MJD {arr_dates[0]:.1f} to {arr_dates[-1]:.1f})")
-
-    # 2. Instantiate the calculator using the real Poliastro Lambert solver
+    print("Initializing PorkchopCalculator for Earth-Mars Transfer...")
     calculator = PorkchopCalculator(
         dep_dates=dep_dates, 
         arr_dates=arr_dates, 
         lambert_solver=poliastro_lambert_solver
     )
 
-    # 3. Execute the grid computations
+    # 2. Calcolo della griglia
     print("Computing ephemerides and solving Lambert's problem across the grid...")
     c3_grid, vinf_arr_grid, tof_grid = calculator.compute()
 
-    # 4. Render the output porkchop plot
-    print("Generating high-fidelity porkchop plot visualization...")
-    fig, ax = plot_porkchop(
+    # 3. Generazione dei grafici di analisi
+    print("Generating mission analysis plots...")
+    
+    # A. Porkchop Plot C3 + TOF contours
+    fig1, ax1, (opt_dep, opt_arr) = plot_porkchop(
         dep_dates=dep_dates, 
         arr_dates=arr_dates, 
         c3_grid=c3_grid, 
         tof_grid=tof_grid, 
         max_c3=45.0, 
-        title="Earth-Mars Interplanetary Transfer Porkchop Plot"
+        title="Earth-Mars Transfer: C3 & TOF Analysis"
     )
+    
+    # B. Grafico della Velocità d'Arrivo
+    fig2, ax2 = plot_vinf_arrival(
+        dep_dates=dep_dates, 
+        arr_dates=arr_dates, 
+        vinf_arr_grid=vinf_arr_grid, 
+        max_vinf=12.0, 
+        title="Earth-Mars Transfer: Arrival Excess Velocity ($v_\infty$)"
+    )
+    
+    # C. Visualizzazione 3D della Traiettoria Ottimale
+    print(f"Plotting optimal 3D transfer trajectory for Departure MJD {opt_dep:.1f} and Arrival MJD {opt_arr:.1f}...")
+    fig3 = plot_trajectory_3d(opt_dep, opt_arr)
 
-    # Display the plot
+    # Mostra tutte le finestre grafiche generate
     plt.show()
 
 if __name__ == "__main__":

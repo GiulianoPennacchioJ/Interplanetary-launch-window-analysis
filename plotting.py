@@ -1,54 +1,110 @@
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
+from astropy import units as u
+from astropy.time import Time
+from poliastro.bodies import Sun, Earth, Mars
+from poliastro.twobody import Orbit
+from poliastro.ephem import Ephem
+from poliastro.iod import lambert
+from poliastro.constants import GM_sun
+from poliastro.plotting import OrbitPlotter3D
 
-def plot_porkchop(dep_dates, arr_dates, c3_grid, tof_grid, max_c3=45.0, title="Interplanetary Porkchop Plot"):
+def plot_porkchop(dep_dates, arr_dates, c3_grid, tof_grid, max_c3=45.0, title="Porkchop Plot"):
     """
-    Generates a professional porkchop plot containing filled C3 contours 
-    and overlaid Time of Flight (TOF) contour lines.
+    Rende il Porkchop plot standard per C3 con contorni del tempo di volo.
+    """
+    X, Y = np.meshgrid(dep_dates, arr_dates)
     
-    Parameters:
-    - dep_dates: Array of departure dates.
-    - arr_dates: Array of arrival dates.
-    - c3_grid: Matrix of C3 values with shape (n_arr, n_dep).
-    - tof_grid: Matrix of TOF values with shape (n_arr, n_dep).
-    - max_c3: Upper bound threshold for C3 to filter out degenerate Type-II branches.
-    - title: Plot title string.
-    """
-    # Mask C3 values exceeding the threshold to preserve color contrast for low-energy paths
-    c3_masked = np.ma.masked_greater(c3_grid, max_c3)
-
-    # Create a cartesian meshgrid aligned with the (n_arr, n_dep) grid shape ('xy' indexing)
-    X, Y = np.meshgrid(dep_dates, arr_dates, indexing='xy')
-
     fig, ax = plt.subplots(figsize=(10, 8))
-
-    # 1. Filled contour plot for C3 (Departure Energy)
-    c3_levels = np.linspace(np.nanmin(c3_grid), max_c3, 30)
-    cs_c3 = ax.contourf(X, Y, c3_masked, levels=c3_levels, cmap='turbo', extend='max')
-    cbar = fig.colorbar(cs_c3, ax=ax)
-    cbar.set_label(r'$C_3$ ($\text{km}^2/\text{s}^2$)')
-
-    # 2. Contour lines for Time of Flight (TOF)
-    tof_min = np.nanmin(tof_grid)
-    tof_max = np.nanmax(tof_grid)
-    tof_levels = np.linspace(tof_min, tof_max, 20)
     
-    cs_tof = ax.contour(X, Y, tof_grid, levels=tof_levels, colors='black', linewidths=0.7, alpha=0.8)
-    ax.clabel(cs_tof, inline=True, fontsize=9, fmt='%1.0f d')
-
-    # 3. Identify and plot the global optimum (minimum C3 point)
-    min_idx = np.nanargmin(c3_grid)
-    j_opt, i_opt = np.unravel_index(min_idx, c3_grid.shape)
+    # Maschera i valori NaN o superiori al limite C3
+    c3_plot = np.ma.masked_invalid(c3_grid)
+    c3_plot = np.ma.masked_where(c3_plot > max_c3, c3_plot)
     
-    ax.plot(dep_dates[i_opt], arr_dates[j_opt], 'r*', markersize=12, 
-            label=f'Min $C_3$: {c3_grid[j_opt, i_opt]:.2f} $\\text{{km}}^2/\\text{{s}}^2$')
-
-    # Axis styling and formatting
-    ax.set_xlabel('Departure Date (MJD)')
-    ax.set_ylabel('Arrival Date (MJD)')
+    # Contourf per C3
+    levels_c3 = np.linspace(c3_plot.min(), max_c3, 25)
+    cs = ax.contourf(X, Y, c3_plot, levels=levels_c3, cmap="turbo", extend="max")
+    cbar = fig.colorbar(cs, ax=ax)
+    cbar.set_label(r"$C_3$ ($\mathrm{km}^2/\mathrm{s}^2$)")
+    
+    # Contour per il Tempo di Volo (TOF) in giorni
+    tof_days = tof_grid
+    levels_tof = np.arange(50, 600, 29)
+    cc = ax.contour(X, Y, tof_days, levels=levels_tof, colors="black", linewidths=0.8, alpha=0.7)
+    ax.clabel(cc, fmt="%d d", fontsize=9, inline=True)
+    
+    # Individua e segna il punto di minimo C3
+    min_idx = np.unravel_index(np.nanargmin(c3_grid), c3_grid.shape)
+    opt_dep = dep_dates[min_idx[1]]
+    opt_arr = arr_dates[min_idx[0]]
+    opt_c3 = c3_grid[min_idx]
+    
+    ax.plot(opt_dep, opt_arr, "r*", markersize=12, label=f"Min C3: {opt_c3:.2f} km^2/s^2")
+    
     ax.set_title(title)
-    ax.grid(True, linestyle='--', alpha=0.5)
-    ax.legend(loc='upper right')
+    ax.set_xlabel("Departure Date (MJD)")
+    ax.set_ylabel("Arrival Date (MJD)")
+    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.legend(loc="upper right")
+    
+    return fig, ax, (opt_dep, opt_arr)
 
-    plt.tight_layout()
+def plot_vinf_arrival(dep_dates, arr_dates, vinf_arr_grid, max_vinf=15.0, title="Arrival Velocity Plot"):
+    """
+    Rende il Porkchop plot specifico per la velocità d'arrivo su Marte.
+    """
+    X, Y = np.meshgrid(dep_dates, arr_dates)
+    
+    fig, ax = plt.subplots(figsize=(10, 8))
+    vinf_plot = np.ma.masked_invalid(vinf_arr_grid)
+    vinf_plot = np.ma.masked_where(vinf_plot > max_vinf, vinf_plot)
+    
+    levels = np.linspace(vinf_plot.min(), max_vinf, 20)
+    cs = ax.contourf(X, Y, vinf_plot, levels=levels, cmap="viridis", extend="max")
+    cbar = fig.colorbar(cs, ax=ax)
+    cbar.set_label(r"Arrival v_inf (km/s)")
+    
+    ax.set_title(title)
+    ax.set_xlabel("Departure Date (MJD)")
+    ax.set_ylabel("Arrival Date (MJD)")
+    ax.grid(True, linestyle="--", alpha=0.5)
+    
     return fig, ax
+
+def plot_trajectory_3d(dep_mjd, arr_mjd):
+    """
+    Genera la visualizzazione 3D della traiettoria eliocentrica di trasferimento 
+    tra la Terra e Marte per date specifiche.
+    """
+    t_dep = Time(dep_mjd, format="mjd", scale="tdb")
+    t_arr = Time(arr_mjd, format="mjd", scale="tdb")
+    
+    k = GM_sun.to(u.km**3 / u.s**2)
+    
+    # Ottieni posizioni e velocità dei pianeti
+    r1_q, v1_q = Ephem.from_body(Earth, t_dep).rv(t_dep)
+    r2_q, v2_q = Ephem.from_body(Mars, t_arr).rv(t_arr)
+    
+    tof_sec = ((arr_mjd - dep_mjd) * 86400.0) * u.s
+    
+    # Risolvi Lambert per trovare le velocità di transito
+    v_init, v_final = lambert(k, r1_q, r2_q, tof_sec)
+    
+    # Crea l'orbita kepleriana di trasferimento
+    ss_transfer = Orbit.from_vectors(Sun, r1_q, v_init, epoch=t_dep)
+    earth_orbit = Orbit.from_ephem(Earth, t_dep)
+    mars_orbit = Orbit.from_ephem(Mars, t_arr)
+    
+    # Plotting 3D
+    fig = plt.figure(figsize=(10, 8))
+    frame = fig.add_subplot(projection="3d")
+    
+    op = OrbitPlotter3D(frame)
+    op.plot(earth_orbit, label="Earth at Departure", color="blue")
+    op.plot(mars_orbit, label="Mars at Arrival", color="red")
+    op.plot(ss_transfer, label="Transfer Orbit", color="orange", linestyle="--")
+    
+    frame.set_title(f"3D Interplanetary Trajectory (TOF: {(arr_mjd - dep_mjd):.1f} days)")
+    frame.legend()
+    
+    return fig

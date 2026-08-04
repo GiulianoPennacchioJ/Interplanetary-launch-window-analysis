@@ -90,10 +90,10 @@ def plot_trajectory_3d(dep_mjd, arr_mjd):
     # Risolvi Lambert per trovare le velocità di transito
     v_init, v_final = lambert(k, r1_q, r2_q, tof_sec)
     
-    # Crea l'orbita kepleriana di trasferimento
+    # Crea l'orbita kepleriana di trasferimento e dei pianeti (specificando Sun come attractor)
     ss_transfer = Orbit.from_vectors(Sun, r1_q, v_init, epoch=t_dep)
-    earth_orbit = Orbit.from_ephem(Earth, t_dep)
-    mars_orbit = Orbit.from_ephem(Mars, t_arr)
+    earth_orbit = Orbit.from_ephem(Sun, Earth, t_dep)
+    mars_orbit = Orbit.from_ephem(Sun, Mars, t_arr)
     
     # Plotting 3D
     fig = plt.figure(figsize=(10, 8))

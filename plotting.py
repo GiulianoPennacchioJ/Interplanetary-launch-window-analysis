@@ -7,7 +7,6 @@ from poliastro.twobody import Orbit
 from poliastro.ephem import Ephem
 from poliastro.iod import lambert
 from poliastro.constants import GM_sun
-from poliastro.plotting import StaticOrbitPlotter3D
 
 def plot_porkchop(dep_dates, arr_dates, c3_grid, tof_grid, max_c3=45.0, title="Porkchop Plot"):
     X, Y = np.meshgrid(dep_dates, arr_dates)
@@ -61,8 +60,8 @@ def plot_vinf_arrival(dep_dates, arr_dates, vinf_arr_grid, max_vinf=15.0, title=
 
 def plot_trajectory_3d(dep_mjd, arr_mjd):
     """
-    Genera la visualizzazione 3D statica (Matplotlib) della traiettoria eliocentrica 
-    di trasferimento tra la Terra e Marte per date specifiche.
+    Genera la visualizzazione 3D nativa in Matplotlib della traiettoria 
+    eliocentrica di trasferimento tra la Terra e Marte.
     """
     t_dep = Time(dep_mjd, format="mjd", scale="tdb")
     t_arr = Time(arr_mjd, format="mjd", scale="tdb")
@@ -76,23 +75,37 @@ def plot_trajectory_3d(dep_mjd, arr_mjd):
     r2_q, v2_q = mars_ephem.rv(t_arr)
     
     tof_sec = ((arr_mjd - dep_mjd) * 86400.0) * u.s
-    
     v_init, v_final = lambert(k, r1_q, r2_q, tof_sec)
     
     ss_transfer = Orbit.from_vectors(Sun, r1_q, v_init, epoch=t_dep)
-    earth_orbit = Orbit.from_ephem(Sun, earth_ephem, t_dep)
-    mars_orbit = Orbit.from_ephem(Sun, mars_ephem, t_arr)
     
-    # Configurazione della figura 3D con Matplotlib
+    # Campiona i punti dell'orbita di trasferimento in unità astronomiche (AU)
+    n_points = 200
+    times = t_dep + np.linspace(0, tof_sec.value, n_points) * u.s
+    transfer_coords = np.array([ss_transfer.propagate(t).r.to(u.au).value for t in times])
+    
+    r1_au = r1_q.to(u.au).value
+    r2_au = r2_q.to(u.au).value
+    
+    # Configurazione della figura 3D con Matplotlib puro
     fig = plt.figure(figsize=(10, 8))
-    frame = fig.add_subplot(projection="3d")
+    ax = fig.add_subplot(projection="3d")
     
-    op = StaticOrbitPlotter3D(frame)
-    op.plot(earth_orbit, label="Earth at Departure", color="blue")
-    op.plot(mars_orbit, label="Mars at Arrival", color="red")
-    op.plot(ss_transfer, label="Transfer Orbit", color="orange", linestyle="--")
+    # Sole nell'origine
+    ax.scatter([0], [0], [0], color="yellow", s=300, label="Sun", depthpath=None)
     
-    frame.set_title(f"3D Interplanetary Trajectory (TOF: {(arr_mjd - dep_mjd):.1f} days)")
-    frame.legend()
+    # Orbita di trasferimento
+    ax.plot(transfer_coords[:, 0], transfer_coords[:, 1], transfer_coords[:, 2], 
+            color="orange", linestyle="--", linewidth=2, label="Transfer Orbit")
+    
+    # Posizioni di Terra e Marte
+    ax.scatter([r1_au[0]], [r1_au[1]], [r1_au[2]], color="blue", s=80, label="Earth (Departure)")
+    ax.scatter([r2_au[0]], [r2_au[1]], [r2_au[2]], color="red", s=80, label="Mars (Arrival)")
+    
+    ax.set_title(f"3D Interplanetary Trajectory (TOF: {(arr_mjd - dep_mjd):.1f} days)")
+    ax.set_xlabel("X (AU)")
+    ax.set_ylabel("Y (AU)")
+    ax.set_zlabel("Z (AU)")
+    ax.legend()
     
     return fig

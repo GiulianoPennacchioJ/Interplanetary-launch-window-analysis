@@ -81,19 +81,22 @@ def plot_trajectory_3d(dep_mjd, arr_mjd):
     
     k = GM_sun.to(u.km**3 / u.s**2)
     
-    # Ottieni posizioni e velocità dei pianeti
-    r1_q, v1_q = Ephem.from_body(Earth, t_dep).rv(t_dep)
-    r2_q, v2_q = Ephem.from_body(Mars, t_arr).rv(t_arr)
+    # Ottieni posizioni e velocità dei pianeti tramite Ephem
+    earth_ephem = Ephem.from_body(Earth, t_dep)
+    mars_ephem = Ephem.from_body(Mars, t_arr)
+    
+    r1_q, v1_q = earth_ephem.rv(t_dep)
+    r2_q, v2_q = mars_ephem.rv(t_arr)
     
     tof_sec = ((arr_mjd - dep_mjd) * 86400.0) * u.s
     
     # Risolvi Lambert per trovare le velocità di transito
     v_init, v_final = lambert(k, r1_q, r2_q, tof_sec)
     
-    # Crea l'orbita kepleriana di trasferimento e dei pianeti (specificando Sun come attractor)
+    # Crea l'orbita kepleriana di trasferimento e delle effemeridi planetarie corrette
     ss_transfer = Orbit.from_vectors(Sun, r1_q, v_init, epoch=t_dep)
-    earth_orbit = Orbit.from_ephem(Sun, Earth, t_dep)
-    mars_orbit = Orbit.from_ephem(Sun, Mars, t_arr)
+    earth_orbit = Orbit.from_ephem(Sun, earth_ephem, t_dep)
+    mars_orbit = Orbit.from_ephem(Sun, mars_ephem, t_arr)
     
     # Plotting 3D
     fig = plt.figure(figsize=(10, 8))

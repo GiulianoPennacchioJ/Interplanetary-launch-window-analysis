@@ -7,33 +7,25 @@ from poliastro.twobody import Orbit
 from poliastro.ephem import Ephem
 from poliastro.iod import lambert
 from poliastro.constants import GM_sun
-from poliastro.plotting import OrbitPlotter3D
+from poliastro.plotting import StaticOrbitPlotter3D
 
 def plot_porkchop(dep_dates, arr_dates, c3_grid, tof_grid, max_c3=45.0, title="Porkchop Plot"):
-    """
-    Rende il Porkchop plot standard per C3 con contorni del tempo di volo.
-    """
     X, Y = np.meshgrid(dep_dates, arr_dates)
-    
     fig, ax = plt.subplots(figsize=(10, 8))
     
-    # Maschera i valori NaN o superiori al limite C3
     c3_plot = np.ma.masked_invalid(c3_grid)
     c3_plot = np.ma.masked_where(c3_plot > max_c3, c3_plot)
     
-    # Contourf per C3
     levels_c3 = np.linspace(c3_plot.min(), max_c3, 25)
     cs = ax.contourf(X, Y, c3_plot, levels=levels_c3, cmap="turbo", extend="max")
     cbar = fig.colorbar(cs, ax=ax)
     cbar.set_label(r"$C_3$ ($\mathrm{km}^2/\mathrm{s}^2$)")
     
-    # Contour per il Tempo di Volo (TOF) in giorni
     tof_days = tof_grid
     levels_tof = np.arange(50, 600, 29)
     cc = ax.contour(X, Y, tof_days, levels=levels_tof, colors="black", linewidths=0.8, alpha=0.7)
     ax.clabel(cc, fmt="%d d", fontsize=9, inline=True)
     
-    # Individua e segna il punto di minimo C3
     min_idx = np.unravel_index(np.nanargmin(c3_grid), c3_grid.shape)
     opt_dep = dep_dates[min_idx[1]]
     opt_arr = arr_dates[min_idx[0]]
@@ -50,11 +42,7 @@ def plot_porkchop(dep_dates, arr_dates, c3_grid, tof_grid, max_c3=45.0, title="P
     return fig, ax, (opt_dep, opt_arr)
 
 def plot_vinf_arrival(dep_dates, arr_dates, vinf_arr_grid, max_vinf=15.0, title="Arrival Velocity Plot"):
-    """
-    Rende il Porkchop plot specifico per la velocità d'arrivo su Marte.
-    """
     X, Y = np.meshgrid(dep_dates, arr_dates)
-    
     fig, ax = plt.subplots(figsize=(10, 8))
     vinf_plot = np.ma.masked_invalid(vinf_arr_grid)
     vinf_plot = np.ma.masked_where(vinf_plot > max_vinf, vinf_plot)
@@ -73,15 +61,14 @@ def plot_vinf_arrival(dep_dates, arr_dates, vinf_arr_grid, max_vinf=15.0, title=
 
 def plot_trajectory_3d(dep_mjd, arr_mjd):
     """
-    Genera la visualizzazione 3D della traiettoria eliocentrica di trasferimento 
-    tra la Terra e Marte per date specifiche.
+    Genera la visualizzazione 3D statica (Matplotlib) della traiettoria eliocentrica 
+    di trasferimento tra la Terra e Marte per date specifiche.
     """
     t_dep = Time(dep_mjd, format="mjd", scale="tdb")
     t_arr = Time(arr_mjd, format="mjd", scale="tdb")
     
     k = GM_sun.to(u.km**3 / u.s**2)
     
-    # Ottieni posizioni e velocità dei pianeti tramite Ephem
     earth_ephem = Ephem.from_body(Earth, t_dep)
     mars_ephem = Ephem.from_body(Mars, t_arr)
     
@@ -90,19 +77,17 @@ def plot_trajectory_3d(dep_mjd, arr_mjd):
     
     tof_sec = ((arr_mjd - dep_mjd) * 86400.0) * u.s
     
-    # Risolvi Lambert per trovare le velocità di transito
     v_init, v_final = lambert(k, r1_q, r2_q, tof_sec)
     
-    # Crea l'orbita kepleriana di trasferimento e delle effemeridi planetarie corrette
     ss_transfer = Orbit.from_vectors(Sun, r1_q, v_init, epoch=t_dep)
     earth_orbit = Orbit.from_ephem(Sun, earth_ephem, t_dep)
     mars_orbit = Orbit.from_ephem(Sun, mars_ephem, t_arr)
     
-    # Plotting 3D
+    # Configurazione della figura 3D con Matplotlib
     fig = plt.figure(figsize=(10, 8))
     frame = fig.add_subplot(projection="3d")
     
-    op = OrbitPlotter3D(frame)
+    op = StaticOrbitPlotter3D(frame)
     op.plot(earth_orbit, label="Earth at Departure", color="blue")
     op.plot(mars_orbit, label="Mars at Arrival", color="red")
     op.plot(ss_transfer, label="Transfer Orbit", color="orange", linestyle="--")

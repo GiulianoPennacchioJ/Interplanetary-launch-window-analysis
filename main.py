@@ -5,6 +5,7 @@ from astropy.time import Time
 from poliastro.bodies import Earth, Mars
 from poliastro.iod import lambert
 from poliastro.constants import GM_sun
+from poliastro.ephem import Ephem
 
 from porkchop import PorkchopCalculator
 from plotting import plot_porkchop
@@ -29,7 +30,7 @@ def poliastro_lambert_solver(dep_mjd, arr_mjd):
     k = GM_sun.to(u.km**3 / u.s**2).value
     
     # Get position (r) and velocity (v) vectors of Earth at departure and Mars at arrival
-    r1_q, v1_q = Earth.ephem(t_dep)
+    r1_q, v1_q = Ephem.from_body(Earth, t_dep).rv(t_dep)
     r2_q, v2_q = Mars.ephem(t_arr)
     
     # Extract numerical values in km and km/s

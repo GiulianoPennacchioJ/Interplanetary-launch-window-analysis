@@ -92,7 +92,7 @@ def plot_trajectory_3d(dep_mjd, arr_mjd):
     ax = fig.add_subplot(projection="3d")
     
     # Sole nell'origine
-    ax.scatter([0], [0], [0], color="yellow", s=300, label="Sun", depthpath=None)
+    ax.scatter([0], [0], [0], color="yellow", s=300, label="Sun")
     
     # Orbita di trasferimento
     ax.plot(transfer_coords[:, 0], transfer_coords[:, 1], transfer_coords[:, 2], 

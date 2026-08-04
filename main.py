@@ -29,9 +29,9 @@ def poliastro_lambert_solver(dep_mjd, arr_mjd):
     # Retrieve Sun gravitational parameter in km^3 / s^2
     k = GM_sun.to(u.km**3 / u.s**2).value
     
-    # Get position (r) and velocity (v) vectors of Earth at departure and Mars at arrival
+    # Get position (r) and velocity (v) vectors using Ephem.from_body (compatible with modern poliastro versions)
     r1_q, v1_q = Ephem.from_body(Earth, t_dep).rv(t_dep)
-    r2_q, v2_q = Mars.ephem(t_arr)
+    r2_q, v2_q = Ephem.from_body(Mars, t_arr).rv(t_arr)
     
     # Extract numerical values in km and km/s
     r1 = r1_q.to(u.km).value

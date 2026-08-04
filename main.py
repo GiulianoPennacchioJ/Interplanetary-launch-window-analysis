@@ -1,85 +1,206 @@
 """
-Main Execution Script per Interplanetary Launch Window Analysis (Earth-Mars 2026).
-Finestre temporali calibrate per catturare l'intero dominio Type-I e Type-II.
+main.py
+=======
+Example script for Interplanetary Launch Window Analysis.
+
+Demonstrates the complete workflow:
+1. Compute porkchop grids for Earth-Mars 2026-2028 window
+2. Generate classic porkchop plots
+3. Compare Type-I vs Type-II transfers
+4. Visualize optimal trajectory in 2D/3D
+
+Usage:
+    python main.py
+
+Requirements:
+    numpy, scipy, matplotlib
 """
 
 import numpy as np
-import warnings
-from ephemeris import julian_date
-from plotting import plot_porkchop, plot_type_split
+import matplotlib.pyplot as plt
+from datetime import datetime
+
+from ephemeris import EphemerisManager
+from lambert_gooding import TransferType
 from porkchop import PorkchopEngine
+from plotting import PorkchopPlotter, TrajectoryPlotter
+
 
 def main():
-    print("==================================================")
-    print(" Interplanetary Launch Window Analysis (Earth-Mars)")
-    print("==================================================")
-    
-    # Finestra di Partenza (Ottobre 2026 - Gennaio 2027)
-    dep_start = julian_date(2026, 9, 15)
-    dep_end = julian_date(2027, 1, 15)
-    
-    # Finestra di Arrivo AMPLIATA (Febbraio 2027 - Aprile 2028)
-    # FONDAMENTALE: Febbraio 2027 serve per catturare il lobo di Type-I!
-    arr_start = julian_date(2027, 2, 1)
-    arr_end = julian_date(2028, 4, 1)
-    
-    # Risoluzione griglia incrementata per isolinee perfettamente lisce
-    dep_jds = np.linspace(dep_start, dep_end, 120)
-    arr_jds = np.linspace(arr_start, arr_end, 120)
-    
-    print("Generating Porkchop grid metrics...")
-    engine = PorkchopEngine(departure_body='earth', arrival_body='mars')
-    
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=RuntimeWarning)
-        porkchop_t1 = engine.generate_grid(dep_jds, arr_jds, lw=0)
-        porkchop_t2 = engine.generate_grid(dep_jds, arr_jds, lw=1)
-    
-    # Unione logica delle due geometrie di trasferimento
-    c3_t1 = np.nan_to_num(porkchop_t1["C3_dep"], nan=np.inf)
-    c3_t2 = np.nan_to_num(porkchop_t2["C3_dep"], nan=np.inf)
-    
-    mask_t1 = c3_t1 < c3_t2
-    c3_combined = np.fmin(c3_t1, c3_t2)
-    c3_combined[c3_combined == np.inf] = np.nan
-    
-    # Mascheramento per eliminare artefatti ad altissima energia (> 50 km²/s²)
-    c3_combined[c3_combined > 50.0] = np.nan
-    
-    tof_combined = np.where(mask_t1, porkchop_t1["TOF"], porkchop_t2["TOF"])
-    vinf_arr_combined = np.where(mask_t1, porkchop_t1["Vinf_arr"], porkchop_t2["Vinf_arr"])
-    
-    porkchop_combined = {
-        'dep_jds': dep_jds,
-        'arr_jds': arr_jds,
-        'C3_dep': c3_combined,
-        'Vinf_arr': vinf_arr_combined,
-        'TOF': tof_combined
-    }
-    
-    if np.all(np.isnan(c3_combined)):
-        print("\nNessuna traiettoria trovata per le date fornite.")
-        return
-        
-    min_idx = np.unravel_index(np.nanargmin(c3_combined), c3_combined.shape)
-    opt_dep_jd = dep_jds[min_idx[1]]
-    opt_arr_jd = arr_jds[min_idx[0]]
-    opt_c3 = c3_combined[min_idx]
-    opt_vinf = vinf_arr_combined[min_idx]
-    opt_tof = tof_combined[min_idx]
-    
-    best_type = "Type-I" if mask_t1[min_idx] else "Type-II"
-    
-    print(f"\n--- Optimal Trajectory Parameters ({best_type}) ---")
-    print(f"Departure JD      : {opt_dep_jd:.2f}")
-    print(f"Arrival JD        : {opt_arr_jd:.2f}")
-    print(f"Time of Flight    : {opt_tof:.1f} days")
-    print(f"Minimum C3 Dep    : {opt_c3:.2f} km²/s²")
-    print(f"Arrival V_infinity: {opt_vinf:.2f} km/s")
-    
-    print("\nDisplaying Porkchop plots...")
-    plot_porkchop(porkchop_combined, title="Earth-Mars 2026 Launch Window (Combined)")
-    plot_type_split(porkchop_t1, porkchop_t2)
+    """Run the complete interplanetary launch window analysis."""
+
+    print("=" * 70)
+    print("INTERPLANETARY LAUNCH WINDOW ANALYSIS")
+    print("Earth to Mars Transfer - 2026/2028 Window")
+    print("=" * 70)
+
+    # Initialize components
+    ephemeris = EphemerisManager()
+
+    # Define date ranges for the 2026-2028 Mars launch window
+    # Mars opposition in 2027: ~Feb 2027
+    # Launch window typically opens ~3 months before opposition
+
+    dep_start = datetime(2026, 6, 1)
+    dep_end = datetime(2027, 6, 1)
+    arr_start = datetime(2026, 12, 1)
+    arr_end = datetime(2028, 1, 1)
+
+    # Convert to Julian Dates
+    dep_start_jd = ephemeris.jd_from_datetime(dep_start)
+    dep_end_jd = ephemeris.jd_from_datetime(dep_end)
+    arr_start_jd = ephemeris.jd_from_datetime(arr_start)
+    arr_end_jd = ephemeris.jd_from_datetime(arr_end)
+
+    # Grid resolution (coarser for faster computation)
+    dep_step = 5.0   # days
+    arr_step = 5.0   # days
+
+    print(f"\nDeparture window: {dep_start.strftime('%Y-%m-%d')} to {dep_end.strftime('%Y-%m-%d')}")
+    print(f"Arrival window:   {arr_start.strftime('%Y-%m-%d')} to {arr_end.strftime('%Y-%m-%d')}")
+    print(f"Grid resolution:  {dep_step} days x {arr_step} days")
+
+    # Initialize engine
+    engine = PorkchopEngine(departure_planet="Earth", arrival_planet="Mars")
+
+    # ============================================================
+    # 1. Compute Type-I (Short-Way) Porkchop Grid
+    # ============================================================
+    print("\n[1/4] Computing Type-I (Short-Way) porkchop grid...")
+
+    grid_short = engine.compute_grid(
+        dep_start_jd=dep_start_jd,
+        dep_end_jd=dep_end_jd,
+        dep_step_days=dep_step,
+        arr_start_jd=arr_start_jd,
+        arr_end_jd=arr_end_jd,
+        arr_step_days=arr_step,
+        transfer_type=TransferType.SHORT_WAY,
+        parking_orbit_alt_dep=200.0,
+        parking_orbit_alt_arr=200.0
+    )
+
+    min_c3, min_dep, min_arr = grid_short.min_c3
+    min_dv, _, _ = grid_short.min_dv
+    print(f"  Type-I Minimum C3:  {min_c3:.2f} km²/s²")
+    print(f"  Type-I Minimum ΔV:  {min_dv:.2f} km/s")
+
+    # ============================================================
+    # 2. Compute Type-II (Long-Way) Porkchop Grid
+    # ============================================================
+    print("\n[2/4] Computing Type-II (Long-Way) porkchop grid...")
+
+    grid_long = engine.compute_grid(
+        dep_start_jd=dep_start_jd,
+        dep_end_jd=dep_end_jd,
+        dep_step_days=dep_step,
+        arr_start_jd=arr_start_jd,
+        arr_end_jd=arr_end_jd,
+        arr_step_days=arr_step,
+        transfer_type=TransferType.LONG_WAY,
+        parking_orbit_alt_dep=200.0,
+        parking_orbit_alt_arr=200.0
+    )
+
+    min_c3_long, min_dep_long, min_arr_long = grid_long.min_c3
+    min_dv_long, _, _ = grid_long.min_dv
+    print(f"  Type-II Minimum C3: {min_c3_long:.2f} km²/s²")
+    print(f"  Type-II Minimum ΔV: {min_dv_long:.2f} km/s")
+
+    # ============================================================
+    # 3. Generate Plots
+    # ============================================================
+    print("\n[3/4] Generating visualizations...")
+
+    plotter = PorkchopPlotter()
+    traj_plotter = TrajectoryPlotter()
+
+    # Classic porkchop plot (Type-I)
+    print("  - Classic porkchop plot (Type-I)...")
+    fig1 = plotter.plot_classic(
+        grid=grid_short,
+        departure_planet="Earth",
+        arrival_planet="Mars",
+        save_path="porkchop_classic_type1.png"
+    )
+
+    # Type-I / Type-II comparison
+    print("  - Type-I vs Type-II comparison...")
+    fig2 = plotter.plot_split_types(
+        grid_short=grid_short,
+        grid_long=grid_long,
+        departure_planet="Earth",
+        arrival_planet="Mars",
+        save_path="porkchop_split_types.png"
+    )
+
+    # Delta-V map
+    print("  - Delta-V contour map...")
+    fig3 = plotter.plot_dv_contour(
+        grid=grid_short,
+        departure_planet="Earth",
+        arrival_planet="Mars",
+        save_path="porkchop_dv_map.png"
+    )
+
+    # 2D Trajectory for optimal Type-I transfer
+    print("  - 2D heliocentric trajectory (optimal Type-I)...")
+    min_c3, opt_dep_jd, opt_arr_jd = grid_short.min_c3
+    fig4 = traj_plotter.plot_2d_trajectory(
+        departure_planet="Earth",
+        arrival_planet="Mars",
+        dep_jd=opt_dep_jd,
+        arr_jd=opt_arr_jd,
+        transfer_type=TransferType.SHORT_WAY,
+        save_path="trajectory_2d_optimal.png"
+    )
+
+    # 3D Trajectory
+    print("  - 3D heliocentric trajectory (optimal Type-I)...")
+    fig5 = traj_plotter.plot_3d_trajectory(
+        departure_planet="Earth",
+        arrival_planet="Mars",
+        dep_jd=opt_dep_jd,
+        arr_jd=opt_arr_jd,
+        transfer_type=TransferType.SHORT_WAY,
+        save_path="trajectory_3d_optimal.png"
+    )
+
+    # ============================================================
+    # 4. Summary Report
+    # ============================================================
+    print("\n[4/4] Analysis Summary")
+    print("-" * 50)
+
+    opt_dep_dt = ephemeris.datetime_from_jd(opt_dep_jd)
+    opt_arr_dt = ephemeris.datetime_from_jd(opt_arr_jd)
+    tof_days = (opt_arr_jd - opt_dep_jd)
+
+    print(f"\nOPTIMAL TYPE-I TRANSFER:")
+    print(f"  Departure Date:     {opt_dep_dt.strftime('%Y-%m-%d')}")
+    print(f"  Arrival Date:       {opt_arr_dt.strftime('%Y-%m-%d')}")
+    print(f"  Time of Flight:     {tof_days:.1f} days")
+    print(f"  C3 (departure):     {min_c3:.2f} km²/s²")
+    print(f"  V∞ (arrival):       {grid_short.vinf_arr_grid[np.unravel_index(np.nanargmin(grid_short.c3_grid), grid_short.c3_grid.shape)]:.2f} km/s")
+    print(f"  Total ΔV:           {min_dv:.2f} km/s")
+
+    print(f"\nOPTIMAL TYPE-II TRANSFER:")
+    opt_dep_dt_long = ephemeris.datetime_from_jd(min_dep_long)
+    opt_arr_dt_long = ephemeris.datetime_from_jd(min_arr_long)
+    tof_days_long = (min_arr_long - min_dep_long)
+
+    print(f"  Departure Date:     {opt_dep_dt_long.strftime('%Y-%m-%d')}")
+    print(f"  Arrival Date:       {opt_arr_dt_long.strftime('%Y-%m-%d')}")
+    print(f"  Time of Flight:     {tof_days_long:.1f} days")
+    print(f"  C3 (departure):     {min_c3_long:.2f} km²/s²")
+    print(f"  Total ΔV:           {min_dv_long:.2f} km/s")
+
+    print("\n" + "=" * 70)
+    print("Analysis complete. Figures saved to current directory.")
+    print("=" * 70)
+
+    plt.show()
+
 
 if __name__ == "__main__":
     main()
